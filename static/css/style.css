@@ -66,7 +66,7 @@ header h1 {
 
 #task {
 	display: grid;
-	grid-template-columns: 1fr;
+	grid-template-columns: 100%;
 	gap: var(--spacing);
 }
 
@@ -110,7 +110,8 @@ input[type="text"]:focus {
 
 #args li {
 	display: grid;
-	grid-template-columns: 1fr 1fr auto;
+	width: 100%;
+	grid-template-columns: repeat(auto-fit minmax(min(100%, 300px), 1fr));
 	gap: 0.5rem;
 	align-items: center;
 }
