@@ -76,6 +76,8 @@ function saveCurrentTask({ id }) {
 		return;
 	}
 
+	if (currentTask.saved) return;
+
 	const root = document.querySelector(
 		`[data-id="${currentTask.id}"] #full-log`,
 	);
@@ -84,6 +86,15 @@ function saveCurrentTask({ id }) {
 		: [];
 	tasks.push(currentTask);
 	localStorage.setItem("tasks", JSON.stringify(tasks));
+	currentTask.saved = true;
+	fetch("/api/save", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(currentTask),
+	})
+		.then((res) => res.json())
+		.then(console.log)
+		.catch(console.error);
 }
 
 /**
@@ -123,24 +134,24 @@ function runCommand({ command, args }) {
 	progress.id = "progress";
 
 	progress.innerHTML = `
-        <div id="progress-container">
-            <div id="progress-header">
-                <div id="progress-title">${command} #${output.children.length + 1}</div>
-                <div id="progress-icon"><i class="fas fa-spinner fa-spin"></i></div>
-            </div>
-            
+		<div id="progress-container">
+			<div id="progress-header">
+				<div id="progress-title">${command} #${output.children.length + 1}</div>
+				<div id="progress-icon"><i class="fas fa-spinner fa-spin"></i></div>
+			</div>
+
 			<div id="progress-bar">
 				<div id="progress-report">
-					<div id="progress-completed" style="width: 0%;"></div>
+					<div id="progress-completed" style="width:0%;"></div>
 				</div>
 				<span id="progress-percentage">0%</span>
 			</div>
-            
-            <div id="progress-log">Waiting to start...</div>
-            <div id="full-log" style="display: none;"></div>
-        </div>
-        <button id="clear" type="button" disabled><i class="fas fa-trash"></i></button>
-        `;
+
+			<div id="progress-log">Waiting to start...</div>
+			<div id="full-log" style="display:none;"></div>
+		</div>
+		<button id="clear" type="button" disabled><i class="fas fa-trash"></i></button>
+	`;
 
 	const logElem = progress.querySelector("#progress-log");
 	const fullLogElem = progress.querySelector("#full-log");
@@ -148,66 +159,116 @@ function runCommand({ command, args }) {
 	const progressPercentage = progress.querySelector("#progress-percentage");
 	const progressIcon = progress.querySelector("#progress-icon");
 	const clearButton = progress.querySelector("#clear");
+
 	const currentTask = {
 		id: crypto.randomUUID(),
 		command,
 		args,
 		status: "running",
 	};
+
 	allTasks[currentTask.id] = currentTask;
 	progress.dataset.id = currentTask.id;
 
+	// Clear button
 	clearButton.onclick = () => {
-		// Only allow clearing if the task is not running
-		if (!progress.classList.contains("running")) {
-			progress.remove();
-		}
+		if (!progress.classList.contains("running")) progress.remove();
 	};
 
-	// Add new progress element to the top of the list and save it to localStorage
 	output.prepend(progress);
 
-	// encode args properly
-	// args: array of argument strings (e.g., ["--foo", "bar", "--url", "test"])
+	// --- SSE setup --------------------------------------------------------
 	const encArgs = encodeURIComponent(JSON.stringify(args));
 	const url = `/api/run?command=${command}&args=${encArgs}`;
 
 	const eventSource = new EventSource(url);
 
+	// --- Helper functions -------------------------------------------------
 	const logProcess = (m) => {
 		logElem.textContent = m;
-		fullLogElem ? (fullLogElem.innerHTML += `<p>${m}</p>`) : 0;
+		fullLogElem.innerHTML += `<p>${m}</p>`;
 	};
 
 	const logProgress = (data) => {
 		const { downloaded, total } = data;
-		const percent = (downloaded / total) * 100;
+		const percent = (downloaded / total) * 100 || 0;
 
 		progressCompleted.style.width = percent.toFixed(2) + "%";
 		progressPercentage.textContent = percent.toFixed(1) + "%";
 
-		// console.log({ data, percent });
 		updateCurrentTask({ id: currentTask.id, status: "processing" });
 	};
 
+	const finalize = (callback) => {
+		clearButton.disabled = false;
+		saveCurrentTask({ id: currentTask.id });
+		eventSource.close();
+		callback?.({ progressElem: progress, currentTask });
+	};
+
+	// --- State machine -----------------------------------------------------
+	const STATE = {
+		completed: {
+			icon: `<i class="fas fa-check-circle"></i>`,
+			class: "completed",
+			status: "completed",
+			before: () => {
+				progressCompleted.style.width = "100%";
+				progressPercentage.textContent = "100%";
+			},
+			fallbackLog: "Completed!",
+		},
+
+		process_error: {
+			icon: `<i class="fas fa-exclamation-circle"></i>`,
+			class: "failed",
+			status: "failed",
+		},
+
+		error: {
+			icon: `<i class="fas fa-exclamation-circle"></i>`,
+			class: "failed",
+			status: "failed",
+			fallbackLog: "Unexpected error",
+		},
+	};
+
+	const completeProgress = (reason, extraLog = null) => {
+		const cfg = STATE[reason];
+		if (!cfg) return;
+
+		// UI changes
+		progressIcon.innerHTML = cfg.icon;
+		progress.classList.remove("running");
+		progress.classList.add(cfg.class);
+
+		// Update task status
+		updateCurrentTask({ id: currentTask.id, status: cfg.status });
+
+		// Optional pre-finalize hook
+		cfg.before?.();
+
+		// Logging
+		const msg = extraLog ?? cfg.fallbackLog;
+		if (msg) logProcess(msg);
+
+		// Cleanup
+		finalize();
+	};
+
+	// --- SSE events -------------------------------------------------------
 	eventSource.onopen = () => {
-		console.log("SSE open");
 		progress.classList.add("running");
 		progress.scrollIntoView({ behavior: "smooth" });
-		clearButton.disabled = true; // Cannot clear while running
 	};
 
 	eventSource.onerror = (e) => {
 		console.error("SSE error:", e);
-		progress.classList.remove("running");
-		clearButton.disabled = false;
-		saveCurrentTask({ id: currentTask.id });
-		eventSource.close();
+		completeProgress("error");
 	};
 
 	eventSource.addEventListener("log", (e) => {
-		const { line } = JSON.parse(e.data);
-		logProcess(line);
+		logProcess(JSON.parse(e.data).line);
 	});
 
 	eventSource.addEventListener("progress", (e) => {
@@ -216,24 +277,11 @@ function runCommand({ command, args }) {
 
 	eventSource.addEventListener("process_error", (e) => {
 		const { log } = JSON.parse(e.data);
-		progress.classList.remove("running");
-		progress.classList.add("failed");
-		updateCurrentTask({ id: currentTask.id, status: "failed" });
-		progressIcon.innerHTML = `<i class="fas fa-exclamation-circle"></i>`;
-		clearButton.disabled = false;
-		eventSource.close();
-		logProcess(log);
+		completeProgress("process_error", log);
 	});
 
 	eventSource.addEventListener("completed", () => {
-		progressCompleted.style.width = "100%";
-		progressPercentage.textContent = "100%";
-		progress.classList.remove("running");
-		progress.classList.add("completed");
-		updateCurrentTask({ id: currentTask.id, status: "completed" });
-		progressIcon.innerHTML = `<i class="fas fa-check-circle"></i>`;
-		clearButton.disabled = false;
-		logProcess("Completed!");
+		completeProgress("completed");
 	});
 }
 

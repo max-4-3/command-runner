@@ -11,7 +11,8 @@ async def run_command(command_root: str, flat_args: Optional[list[str]]):
         raise NotImplementedError(f"'{command_root}' is not currently supported!")
 
     flat_args = flat_args or []
-    assert len(flat_args) == 0, "A video url is required"
+    if len(flat_args) < 1:
+        raise ValueError("A video URL is required")
 
     # Helper to format SSE event
     def format_sse(data, event=None):
