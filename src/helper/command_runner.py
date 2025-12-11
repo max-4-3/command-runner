@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from consts import OUTPUT_TEMPLATE, YT_AUDIO, YT_VIDEO
+from .consts import OUTPUT_TEMPLATE, YT_AUDIO, YT_VIDEO
 
 
 async def run_command(command_root: str, flat_args: Optional[list[str]]):

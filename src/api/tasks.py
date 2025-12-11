@@ -18,8 +18,13 @@ async def run(command: str, args: Optional[Any]):
                 detail="Invalid 'args': expected a URI-decoded, JSON-encoded flat array of strings.",
             )
 
+    try:
+        event_stream = run_command(command, args)
+    except Exception as e:
+        raise HTTPException(500, detail=str(e))
+
     return StreamingResponse(
-        run_command(command, args),
+        event_stream,
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
