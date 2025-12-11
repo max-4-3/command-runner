@@ -18,6 +18,9 @@ app.include_router(router, prefix="/api")
 async def root():
     return FileResponse("./pages/index.html")
 
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse("./static/favicon.ico")
 
 if __name__ == "__main__":
     uvicorn.run("main:app", port=9090, reload=True)
