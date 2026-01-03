@@ -41,6 +41,9 @@ async def run(command: str, args: Optional[Any]):
 async def save_task(
     task: TaskClient = Body(...), session: Session = Depends(create_session)
 ):
+    if not task.fullLog:
+        raise HTTPException(400, "Log is empty")
+
     await save_client_task(task, session)
     session.refresh(task)
     return {"saved": task}

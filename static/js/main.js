@@ -9,33 +9,39 @@ const allTasks = {};
  * UUID Fallback
  */
 if (!crypto.randomUUID) {
-    crypto.randomUUID = function () {
-        if (crypto.getRandomValues) {
-            const bytes = new Uint8Array(16);
-            crypto.getRandomValues(bytes);
+	crypto.randomUUID = function() {
+		if (crypto.getRandomValues) {
+			const bytes = new Uint8Array(16);
+			crypto.getRandomValues(bytes);
 
-            // RFC 4122 compliance
-            bytes[6] = (bytes[6] & 0x0f) | 0x40; // Version 4
-            bytes[8] = (bytes[8] & 0x3f) | 0x80; // Variant 10
+			// RFC 4122 compliance
+			bytes[6] = (bytes[6] & 0x0f) | 0x40; // Version 4
+			bytes[8] = (bytes[8] & 0x3f) | 0x80; // Variant 10
 
-            const hex = [...bytes].map(b => b.toString(16).padStart(2, "0")).join("");
+			const hex = [...bytes]
+				.map((b) => b.toString(16).padStart(2, "0"))
+				.join("");
 
-            return (
-                hex.slice(0, 8) + "-" +
-                hex.slice(8, 12) + "-" +
-                hex.slice(12, 16) + "-" +
-                hex.slice(16, 20) + "-" +
-                hex.slice(20)
-            );
-        }
+			return (
+				hex.slice(0, 8) +
+				"-" +
+				hex.slice(8, 12) +
+				"-" +
+				hex.slice(12, 16) +
+				"-" +
+				hex.slice(16, 20) +
+				"-" +
+				hex.slice(20)
+			);
+		}
 
-        // LAST fallback (insecure)
-        return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
-            const r = Math.random() * 16 | 0;
-            const v = c === "x" ? r : (r & 0x3) | 0x8;
-            return v.toString(16);
-        });
-    };
+		// LAST fallback (insecure)
+		return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+			const r = (Math.random() * 16) | 0;
+			const v = c === "x" ? r : (r & 0x3) | 0x8;
+			return v.toString(16);
+		});
+	};
 }
 
 /**
@@ -68,18 +74,7 @@ function loadFormState() {
 
 	if (saved.args?.length) {
 		for (const { key, value } of saved.args) {
-			const li = document.createElement("li");
-			li.innerHTML = `
-				<input type="text" name="arg-key" placeholder="--url / --id / --output" required value="${key || ""}"/>
-				<input type="text" name="arg-value" placeholder="value" value="${value || ""}"/>
-				<button id="delete" type="button" class="btn btn-delete">
-					<i class="fas fa-times"></i>
-				</button>
-			`;
-			li.querySelector("button#delete").onclick = () => {
-				if (argsList.children.length > 1) li.remove();
-			};
-			argsList.appendChild(li);
+			createNewArgRow({ argKeyValue: key, argValueValue: value });
 		}
 	}
 
@@ -133,25 +128,59 @@ function saveCurrentTask({ id }) {
 /**
  * Creates a new argument input row.
  */
-function createNewArgRow() {
+
+function createNewArgRow({ argKeyValue = "", argValueValue = "" } = {}) {
 	if (!taskForm.checkValidity()) return taskForm.reportValidity();
 
 	const newLi = document.createElement("li");
 	newLi.innerHTML = `
-        <input type="text" name="arg-key" placeholder="--url / --id / --output" required/>
-        <input type="text" name="arg-value" placeholder="value" />
-        <button id="delete" type="button" class="btn btn-delete">
-            <i class="fas fa-times"></i>
-        </button>
-    `;
+		<input type="text" name="arg-key" placeholder="--url / --id / --output" required value="${argKeyValue}" />
+		<input type="text" name="arg-value" placeholder="value" value="${argValueValue}" />
+		<button type="button" class="btn delete">
+			<i class="fas fa-times"></i>
+		</button>
+	`;
 
-	// Deletes the argument row, but ensures at least one row remains
-	newLi.querySelector("button#delete").onclick = () => {
-		if (argsList.children.length > 1) {
-			newLi.remove();
-		} else {
+	const deleteBtn = newLi.querySelector(".delete");
+
+	deleteBtn.onclick = () => {
+		// ensure at least one row stays active
+		if (
+			argsList.children.length <= 1 &&
+			!newLi.classList.contains("disabled")
+		) {
 			taskForm.reportValidity();
+			return;
 		}
+
+		const isDisabled = newLi.classList.contains("disabled");
+		const inputs = newLi.querySelectorAll('input[type="text"]');
+		const isEmpty = [...inputs].every((el) => el.value.trim() === "");
+
+		if (isEmpty && argsList.children.length > 1) {
+			newLi.remove();
+			return;
+		}
+
+		inputs.forEach((el) => {
+			if (isDisabled) {
+				el.removeAttribute("disabled");
+				if (el.name === "arg-key") el.setAttribute("required", "");
+			} else {
+				el.setAttribute("disabled", "");
+				el.removeAttribute("required");
+			}
+		});
+
+		newLi.classList.toggle("disabled", !isDisabled);
+
+		deleteBtn.innerHTML = isDisabled
+			? `<i class="fas fa-times"></i>`
+			: `<i class="fas fa-check"></i>`;
+
+		deleteBtn.style.background = isDisabled
+			? "var(--color-fail)"
+			: "var(--color-success)";
 	};
 
 	argsList.appendChild(newLi);
@@ -183,8 +212,11 @@ function runCommand({ command, args }) {
 			<div id="progress-log">Waiting to start...</div>
 			<div id="full-log" style="display:none;"></div>
 		</div>
+		<div class="actions">
+		<button id="cancel" type="button"><i class="fas fa-xmark"></i></button>
 		<button id="clear" type="button" disabled><i class="fas fa-trash"></i></button>
-	`;
+		</div>
+		`;
 
 	const logElem = progress.querySelector("#progress-log");
 	const fullLogElem = progress.querySelector("#full-log");
@@ -192,6 +224,7 @@ function runCommand({ command, args }) {
 	const progressPercentage = progress.querySelector("#progress-percentage");
 	const progressIcon = progress.querySelector("#progress-icon");
 	const clearButton = progress.querySelector("#clear");
+	const canelButton = progress.querySelector("#cancel");
 
 	const currentTask = {
 		id: crypto.randomUUID(),
@@ -206,6 +239,13 @@ function runCommand({ command, args }) {
 	// Clear button
 	clearButton.onclick = () => {
 		if (!progress.classList.contains("running")) progress.remove();
+	};
+
+	// Cancel button
+	canelButton.onclick = () => {
+		if (progress.classList.contains("running")) {
+			completeProgress("cancel");
+		}
 	};
 
 	output.prepend(progress);
@@ -234,6 +274,7 @@ function runCommand({ command, args }) {
 
 	const finalize = (callback) => {
 		clearButton.disabled = false;
+		canelButton.disabled = true;
 		saveCurrentTask({ id: currentTask.id });
 		eventSource.close();
 		callback?.({ progressElem: progress, currentTask });
@@ -256,6 +297,13 @@ function runCommand({ command, args }) {
 			icon: `<i class="fas fa-exclamation-circle"></i>`,
 			class: "failed",
 			status: "failed",
+		},
+
+		cancel: {
+			icon: `<i class="fas fa-ban"></i>`,
+			class: "completed",
+			status: "cancelled",
+			fallbackLog: "Cancelled!"
 		},
 
 		error: {
@@ -330,7 +378,15 @@ taskForm.addEventListener("submit", (e) => {
 	const formData = new FormData(taskForm);
 
 	const command = formData.get("command");
-	const args = Array.from(formData.values()).filter(Boolean).splice(1); // Get all values leaving the first one as it is the `command` which is not neccesary and filter all
+	const args = [];
+
+	for (const argLi of document.querySelectorAll("ol#args li")) {
+		if (argLi.classList.contains("disabled")) continue;
+		const inputs = argLi.querySelectorAll('input[type="text"]');
+		inputs.forEach((e) => {
+			e.value && args.push(e.value);
+		});
+	}
 
 	const payload = {
 		command,
