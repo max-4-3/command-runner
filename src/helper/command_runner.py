@@ -102,7 +102,7 @@ async def ffmpeg_runner(args: list[str] | None):
             if not text.startswith("[info]"):
                 continue
 
-            if text.endswith("\r") and (ctm := time_pattern.search(text)):
+            if (ctm := time_pattern.search(text)):
                 current_time = get_time(ctm.group(1))
             elif (
                 text.endswith("\n")
